@@ -6,6 +6,7 @@ from dialog import Dialog
 import sys
 import capnp
 import operator
+import glob
 
 locale.setlocale(locale.LC_ALL, '')
 
@@ -134,7 +135,39 @@ def handleField(node,tag,setInit = True):
     
 def main():
 
-    userSchema = capnp.load('configfile.capnp')
+    currPath = sys.path[0]
+    wildcard = '*.capnp'
+ 
+    chWildcard = 'Change schema wildcard'
+    chDir = 'Change directory'
+
+    while True:
+
+        schemaFiles = [(x,'') for x in glob.glob(wildcard)]
+        code, tag = d.menu('Schema selection',
+                           choices=schemaFiles+[
+                               (chDir, '('+currPath+')'),
+                               (chWildcard, '('+wildcard+')')])
+    
+        if code == Dialog.CANCEL:
+            return
+    
+        if tag == chWildcard:
+            code, tag = d.inputbox('Wildcard',init = wildcard)
+            if code == Dialog.OK:
+                wildcard = tag
+            continue
+    
+        if tag == chDir:
+            code, tag = d.dselect(currPath)
+            if code == Dialog.OK:
+                currPath = tag
+
+        else:
+            break
+    
+    userSchema = capnp.load(str(tag))
+
     (code,rootStruct) = d.menu('Select root struct', 
                          choices = [(x.name,'') for x in userSchema.schema.node.nestedNodes])
 
