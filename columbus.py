@@ -7,6 +7,7 @@ import sys
 import capnp
 import operator
 import glob
+import os
 
 locale.setlocale(locale.LC_ALL, '')
 
@@ -133,9 +134,21 @@ def handleField(node,tag,setInit = True):
     except capnp.KjException:
           return handleField(node,tag, False)
     
+class Chdir:         
+      def __init__( self ):  
+        self.savedPath = os.getcwd()
+
+      def changeDir(self  , newPath ):
+        os.chdir(newPath)
+
+      def __del__( self ):
+        os.chdir( self.savedPath )
+
 def main():
 
-    currPath = sys.path[0]
+    dirMngr = Chdir()
+
+    currPath = os.getcwd()
     wildcard = '*.capnp'
  
     chWildcard = 'Change schema wildcard'
@@ -146,7 +159,7 @@ def main():
         schemaFiles = [(x,'') for x in glob.glob(wildcard)]
         code, tag = d.menu('Schema selection',
                            choices=schemaFiles+[
-                               (chDir, '('+currPath+')'),
+                               (chDir, '('+os.getcwd()+')'),
                                (chWildcard, '('+wildcard+')')])
     
         if code == Dialog.CANCEL:
@@ -159,9 +172,9 @@ def main():
             continue
     
         if tag == chDir:
-            code, tag = d.dselect(currPath)
+            code, tag = d.dselect(os.getcwd())
             if code == Dialog.OK:
-                currPath = tag
+                dirMngr.changeDir(tag)
 
         else:
             break
