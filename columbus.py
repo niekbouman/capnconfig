@@ -16,19 +16,24 @@ d.set_background_title("Captain Config: Cap'n Proto Explorer")
 
 floatTypes = ['float32','float64']
 integralTypes = ['uint8','uint16','uint32','uint64','int8','int16','int32','int64']
+modLen = 'Modify list length'
+
 
 def fieldTypeAsString(field):
     '''Determine the type of the field'''
+
     try:
         return field.schema.node.which()
-    except (capnp.KjException,AttributeError) as e:
-        return field.proto.slot.type.which() #to_dict().keys()[0]
+    except capnp.KjException:
+        return field.proto.slot.type.which()
+    except AttributeError:
+        return field.proto.slot.type.which()
 
 def abbreviate(obj):
     '''Stringify object and, if necessary, abbreviate and append ellipsis'''
     s = str(obj)
-    if len(s) > 10:
-       s = s[:10]+'...' 
+    if len(s) > 20:
+       s = s[:20]+'...' 
     return s
 
 def unionDialog(node):
@@ -38,8 +43,11 @@ def unionDialog(node):
     if code == Dialog.CANCEL:
         return 
 
-    handleField(node,selectedField)
-    return
+    #initialize if necessary
+    if node.schema.fields[selectedField].proto.slot.type.which() == 'struct':
+        getattr(node,'init')(selectedField)
+
+    handleField(node,selectedField,setInit=False)
 
 def getValueDialog(node,tag,datatype,setInit=True):
     stringRepr = str(datatype).split("'")[1]
@@ -52,12 +60,23 @@ def getValueDialog(node,tag,datatype,setInit=True):
         except ValueError:
             d.msgbox("Please enter a value of type '%s'" % stringRepr)
 
+def newgetValueDialog(getter,setter,datatype,setInit=True):
+    stringRepr = str(datatype).split("'")[1]
+    (code,inp) = d.inputbox('Set %s field' % stringRepr, init = str(getter() if setInit else ''))
+    if code == Dialog.OK:
+        try:
+            setter(datatype(inp))
+        except capnp.KjException:
+            d.msgbox('Illegal value')
+        except ValueError:
+            d.msgbox("Please enter a value of type '%s'" % stringRepr)
+
 def isNamedUnion(node):
     return len(node.schema.non_union_fields) == 0
 
-def handleStruct(node):
+def handleStruct(node,skipUnionCheck=False):
     while True:
-        if isNamedUnion(node):
+        if not skipUnionCheck and isNamedUnion(node):
             unionDialog(node)
             return
 
@@ -68,7 +87,7 @@ def handleStruct(node):
             # add the active union field to the list of visible fields
             visibleFields += (node.which(),)
 
-        (code, tag) = d.menu('Traverse struct', ok_label='Modify',cancel_label='Exit',choices = [(name,abbreviate(getattr(node,name))) for name in visibleFields])
+        (code, tag) = d.menu('Traverse struct', ok_label='Modify',cancel_label='Exit' if node.is_root else 'Back',choices = [(name,abbreviate(getattr(node,name))) for name in visibleFields])
 
         if code == Dialog.CANCEL:
             return 
@@ -81,59 +100,108 @@ def handleStruct(node):
         else:    
             handleField(node,tag)
 
+def listLenDialog():
+    while True:
+        (code,inp) = d.inputbox('Choose list size')
+        if code == Dialog.CANCEL:
+            return
+        length = int(inp)
+        if length > 0:
+            node.init(tag,int(inp))
+            break
+        d.msgbox('Invalid list length')
 
+def handleField(parentNode, fieldName, fieldSchema = None, fieldType = None, getter = None, 
+setter = None, setInit = True):
+        '''
+        The 'setInit' option can be used to prevent fields from displaying the current value.
+        (trying to get() a union member which is not currently initialized gives a KjException)
+        '''
+    
+        if getter is None:
+            getter = lambda : getattr(parentNode,fieldName) 
+        if setter is None:
+            setter = lambda x : setattr(parentNode,fieldName,x) 
+        if fieldSchema is None:
+            fieldSchema  = parentNode.schema.fields[fieldName]
+        if fieldType is None:
+            fieldType = fieldTypeAsString(fieldSchema) 
+    
+        if fieldType == 'enum':
+    
+            sortedItems = sorted(parentNode.schema.fields[fieldName].schema.enumerants.items(),key=operator.itemgetter(1))
+            (code,enumerant) = d.radiolist('Select enumerant', choices = [(x[0],'',True if x[0] == getter() else False) for x in sortedItems])
+            if code == Dialog.CANCEL:
+                return
 
-def handleField(node,tag,setInit = True):
-    '''
-    The 'setInit' option can be used to prevent fields from displaying the current value.
-    I.e., trying to get() a union member which is not currently initialized gives a KjException,
-    which we use here in the following way: we try to display the current value (setInit = True), 
-    if this results in an exception we retry with 'setInit = False'
-    '''
-    try:
-        field = node.schema.fields[tag] 
+            setter(enumerant)
     
-        fieldtype = fieldTypeAsString(field)
-    
-        if fieldtype == 'enum':
-    
-            sortedItems = sorted(field.schema.enumerants.items(),key=operator.itemgetter(1))
-    
-            (code,enumerant) = d.radiolist('Select enumerant', choices = [(x[0],'',True if x[0] == getattr(node,tag) else False) for x in sortedItems])
-            setattr(node,tag, enumerant)
-    
-        elif fieldtype == 'bool':
-            (code,tf) = d.radiolist('Select boolean', choices = [(str(x),'',getattr(node,tag)==x) for x in [True,False]])
+        elif fieldType == 'bool':
+            (code,tf) = d.radiolist('Select boolean', choices = [(str(x),'',getter()==x) for x in [True,False]])
+            if code == Dialog.CANCEL:
+                return
+
             val = True if tf == 'True' else False
-            setattr(node,tag, val)
+            setter(val)
     
-        elif fieldtype == 'text':
-            (code,string) = d.inputbox('Set text field', init = getattr(node,tag) if setInit else '')
-            if code == Dialog.OK:
-                setattr(node,tag, string)
+        elif fieldType in  ['text','str']:
+            (code,string) = d.inputbox('Set text field', init = getter() if setInit else '')
+            if code == Dialog.CANCEL:
+                return
+
+            setter(string)
     
-        elif fieldtype == 'struct':
-            handleStruct(getattr(node,tag))
+        elif fieldType == 'struct':
+            handleStruct(getattr(parentNode,fieldName)) 
     
-        elif fieldtype in floatTypes:
-            getValueDialog(node,tag,float,setInit)
+        elif fieldType in floatTypes:
+            newgetValueDialog(getter,setter,float,setInit)
     
-        elif fieldtype in integralTypes:
-            getValueDialog(node,tag,int,setInit)
+        elif fieldType in integralTypes:
+            newgetValueDialog(getter,setter,int,setInit)
     
-        elif fieldtype == 'void':
-            setattr(node,tag,None)
+        elif fieldType == 'void':
+            setter(None)
     
-        elif fieldtype == 'list':
-            print 'list'
-            exit()
+        elif fieldType == 'list':
+
+            if len(getattr(parentNode,fieldName)) == 0:
+                while True:
+                    (code,inp) = d.inputbox('Choose list size')
+                    if code == Dialog.CANCEL:
+                        return
+                    length = int(inp)
+                    if length > 0:
+                        parentNode.init(fieldName,int(inp))
+                        break
+                    d.msgbox('Invalid list length')
+
+            while True:
+
+                menuItems = [(str(i),str(entry)) for i,entry in enumerate(getattr(parentNode,fieldName))]
+
+                (code, selection) = d.menu('Edit list', ok_label='Modify',cancel_label='Back',choices = menuItems + [(modLen,'')] )
+                if code == Dialog.CANCEL:
+                    return
+
+                if selection == modLen:
+                    parentNode.init(fieldName,0)
+                    return handleField(parentNode,fieldName) #,field, getter,setter)
+                else:
+                    gttr = lambda: getattr(parentNode,fieldName)[int(selection)]
+                    sttr = lambda x: getattr(getattr(parentNode,fieldName),'__setitem__')(int(selection),x)
+
+                    listElemType = parentNode.schema.fields[fieldName].proto.slot.type.list.elementType.which()
+
+                    if listElemType == 'struct':
+                        handleStruct(gttr(),skipUnionCheck = True)
+                    else:
+                        handleField(parentNode,fieldName, fieldType = listElemType,getter=gttr,setter=sttr)
     
         else:
-            print fieldtype
+            print 'Not implemented yet:', fieldType
             exit()
-    except capnp.KjException:
-          return handleField(node,tag, False)
-    
+   
 class Chdir:         
       def __init__( self ):  
         self.savedPath = os.getcwd()
