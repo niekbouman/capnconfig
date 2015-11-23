@@ -49,18 +49,7 @@ def unionDialog(node):
 
     handleField(node,selectedField,setInit=False)
 
-def getValueDialog(node,tag,datatype,setInit=True):
-    stringRepr = str(datatype).split("'")[1]
-    (code,inp) = d.inputbox('Set %s field' % stringRepr, init = str(getattr(node,tag) if setInit else ''))
-    if code == Dialog.OK:
-        try:
-            setattr(node,tag, datatype(inp))
-        except capnp.KjException:
-            d.msgbox('Illegal value')
-        except ValueError:
-            d.msgbox("Please enter a value of type '%s'" % stringRepr)
-
-def newgetValueDialog(getter,setter,datatype,setInit=True):
+def getValueDialog(getter,setter,datatype,setInit=True):
     stringRepr = str(datatype).split("'")[1]
     (code,inp) = d.inputbox('Set %s field' % stringRepr, init = str(getter() if setInit else ''))
     if code == Dialog.OK:
@@ -155,10 +144,10 @@ setter = None, setInit = True):
             handleStruct(getattr(parentNode,fieldName)) 
     
         elif fieldType in floatTypes:
-            newgetValueDialog(getter,setter,float,setInit)
+            getValueDialog(getter,setter,float,setInit)
     
         elif fieldType in integralTypes:
-            newgetValueDialog(getter,setter,int,setInit)
+            getValueDialog(getter,setter,int,setInit)
     
         elif fieldType == 'void':
             setter(None)
